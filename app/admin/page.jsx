@@ -1,24 +1,35 @@
 "use client";
 import { useState, useEffect } from 'react';
+import { useAuth } from './../context/AuthContext';
 
 export default function AdminDashboard() {
+  const { user, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
 
-  // FETCH DYNAMIC DATA ON LOAD
+  // STRICT SECURITY CHECK: Redirect immediately if not an admin
   useEffect(() => {
-    fetch('/api/admin/data')
-      .then(res => res.json())
-      .then(data => {
-        setProducts(data.products);
-        setOrders(data.orders);
-        setLoading(false);
-      });
-  }, []);
+    if (!authLoading && (!user || user.role !== 'admin')) {
+      window.location.href = '/admin/login';
+    }
+  }, [user, authLoading]);
 
-  // GLOBAL DATABASE MUTATION FUNCTION
+  // FETCH DYNAMIC DATA FROM JSON FILE
+  useEffect(() => {
+    if (user && user.role === 'admin') {
+      fetch('/api/admin/data')
+        .then(res => res.json())
+        .then(data => {
+          setProducts(data.products || []);
+          setOrders(data.orders || []);
+          setDataLoading(false);
+        });
+    }
+  }, [user]);
+
+  // SEND CHANGES TO JSON FILE
   const mutateData = async (action, payload) => {
     const res = await fetch('/api/admin/data', {
       method: 'POST',
@@ -32,19 +43,23 @@ export default function AdminDashboard() {
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
-    window.location.href = '/admin/login'; // Hard redirect for clean logout
+    window.location.href = '/admin/login';
   };
 
-  // --- ACTIONS ---
+  // --- PRODUCT ACTIONS ---
   const handleAddProduct = () => {
     const name = prompt("Enter Product Name:");
     const price = prompt("Enter Price (₹):");
-    if (name && price) mutateData('ADD_PRODUCT', { name, price: Number(price) });
+    if (name && price && !isNaN(price)) {
+      mutateData('ADD_PRODUCT', { name, price: Number(price) });
+    }
   };
 
   const handleEditProduct = (id) => {
     const newPrice = prompt("Enter new price (₹):");
-    if (newPrice) mutateData('EDIT_PRODUCT', { id, price: Number(newPrice) });
+    if (newPrice && !isNaN(newPrice)) {
+      mutateData('EDIT_PRODUCT', { id, price: Number(newPrice) });
+    }
   };
 
   const handleDeleteProduct = (id) => {
@@ -53,19 +68,42 @@ export default function AdminDashboard() {
     }
   };
 
-  const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0);
+  // Stop rendering if auth is still checking or data is loading
+  if (authLoading || dataLoading || !user || user.role !== 'admin') {
+    return (
+      <div style={{ padding: '3rem', fontSize: '1.5rem', fontWeight: 'bold' }}>
+        Verifying Security & Loading Database...
+      </div>
+    );
+  }
 
-  if (loading) return <div style={{ padding: '3rem' }}>Loading Admin Data...</div>;
+  const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0);
 
   return (
     <div style={styles.layout}>
+      
       {/* SIDEBAR */}
       <div style={styles.sidebar}>
         <h2 style={styles.sidebarTitle}>Admin Portal</h2>
         <ul style={styles.sidebarMenu}>
-          <li onClick={() => setActiveTab('dashboard')} style={activeTab === 'dashboard' ? styles.activeTab : styles.inactiveTab}>📊 Overview</li>
-          <li onClick={() => setActiveTab('products')} style={activeTab === 'products' ? styles.activeTab : styles.inactiveTab}>📦 Products</li>
-          <li onClick={() => setActiveTab('orders')} style={activeTab === 'orders' ? styles.activeTab : styles.inactiveTab}>🛒 Orders</li>
+          <li 
+            onClick={() => setActiveTab('dashboard')} 
+            style={activeTab === 'dashboard' ? styles.activeTab : styles.inactiveTab}
+          >
+            📊 Overview
+          </li>
+          <li 
+            onClick={() => setActiveTab('products')} 
+            style={activeTab === 'products' ? styles.activeTab : styles.inactiveTab}
+          >
+            📦 Products
+          </li>
+          <li 
+            onClick={() => setActiveTab('orders')} 
+            style={activeTab === 'orders' ? styles.activeTab : styles.inactiveTab}
+          >
+            🛒 Orders
+          </li>
         </ul>
         <button onClick={handleLogout} style={styles.logoutBtn}>Sign Out</button>
       </div>
@@ -73,7 +111,7 @@ export default function AdminDashboard() {
       {/* MAIN CONTENT AREA */}
       <div style={styles.mainContent}>
         
-        {/* OVERVIEW TAB */}
+        {/* TAB: OVERVIEW */}
         {activeTab === 'dashboard' && (
           <div>
             <h1 style={styles.pageHeader}>Business Overview</h1>
@@ -86,17 +124,22 @@ export default function AdminDashboard() {
                 <p style={styles.cardLabel}>TOTAL ORDERS</p>
                 <h2 style={styles.cardValue}>{orders.length}</h2>
               </div>
+              <div style={styles.card}>
+                <p style={styles.cardLabel}>TOTAL PRODUCTS</p>
+                <h2 style={styles.cardValue}>{products.length}</h2>
+              </div>
             </div>
           </div>
         )}
 
-        {/* PRODUCTS TAB */}
+        {/* TAB: PRODUCTS */}
         {activeTab === 'products' && (
           <div>
             <div style={styles.headerRow}>
               <h1 style={styles.pageHeader}>Manage Products</h1>
               <button onClick={handleAddProduct} style={styles.addBtn}>+ Add Product</button>
             </div>
+            
             <div style={styles.tableContainer}>
               <table style={styles.table}>
                 <thead style={styles.tableHead}>
@@ -125,7 +168,7 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* ORDERS TAB */}
+        {/* TAB: ORDERS */}
         {activeTab === 'orders' && (
           <div>
             <h1 style={styles.pageHeader}>Live Sales & Orders</h1>
@@ -149,7 +192,13 @@ export default function AdminDashboard() {
                         <select 
                           value={o.status} 
                           onChange={(e) => mutateData('UPDATE_ORDER_STATUS', { id: o.id, status: e.target.value })}
-                          style={{ padding: '6px', cursor: 'pointer' }}
+                          style={{ 
+                            padding: '6px', 
+                            cursor: 'pointer', 
+                            borderRadius: '3px', 
+                            border: '1px solid #ccc',
+                            background: o.status === 'Delivered' ? '#d1fae5' : o.status === 'Shipped' ? '#dbeafe' : '#fef3c7' 
+                          }}
                         >
                           <option value="Pending">Pending</option>
                           <option value="Shipped">Shipped</option>
@@ -169,7 +218,7 @@ export default function AdminDashboard() {
   );
 }
 
-// Same styles object from before
+// Styles
 const styles = {
   layout: { display: 'flex', minHeight: '100vh', backgroundColor: '#f9fafb' },
   sidebar: { width: '250px', backgroundColor: '#111827', color: 'white', padding: '2rem', display: 'flex', flexDirection: 'column' },
